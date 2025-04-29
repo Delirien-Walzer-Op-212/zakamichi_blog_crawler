@@ -1,0 +1,29 @@
+{
+  "name": "zakamichi-blog-crawler",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A Node-based crawler for Zakamichi group blogs, including Sakurazaka46, Hinatazaka46, Nogizaka46, and Bokuao.",
+  "main": "program.js",
+  "scripts": {
+    "start": "node program.js",
+    "serve": "node server.js",
+    "test": "echo \"No test specified\" && exit 0"
+  },
+  "keywords": [
+    "crawler",
+    "blog",
+    "sakurazaka46",
+    "hinatazaka46",
+    "nogizaka46",
+    "bokuao"
+  ],
+  "author": "kirill",
+  "license": "MIT",
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "axios": "^1.8.4",
+    "express": "^4.21.2",
+    "node-html-parser": "^7.0.1",
+    "prompt-sync": "^4.2.0"
+  }
+}
