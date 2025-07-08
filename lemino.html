@@ -112,7 +112,7 @@
 
         async function loadAllImagesParallel() {
             const startHex = 'c69';
-            const hexRangeLength = 300;
+            const hexRangeLength = 500;
             const hexRange = Array.from({ length: hexRangeLength }, (_, i) =>
                 intToHex(hexToInt(startHex) + i)
             );
@@ -129,7 +129,8 @@
                 const found = results.filter(r => r.exists);
                 totalChecked += urlSuffixes.length;
 
-                statusMessage.innerHTML = `
+                statusMessage.innerHTML =
+                    `
                     <div class="loading">
                         <div class="spinner"></div>
                         <span>Checked hex ${hex} → Found ${found.length} images (Total Checked: ${totalChecked})</span>

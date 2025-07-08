@@ -24,6 +24,7 @@ export const threadCount = os.cpus().length;
 // We'll just store the numeric concurrency here:
 
 // Home pages
+export const Keyakizaka46_HomePage = 'https://keyakizaka46.com';
 export const Sakurazaka46_HomePage = 'https://sakurazaka46.com';
 export const Hinatazaka46_HomePage = 'https://hinatazaka46.com';
 export const Nogizaka46_HomePage = 'https://nogizaka46.com';
@@ -38,6 +39,7 @@ export const Desired_MemberList_FilePath = 'Desired_Member_List.JSON';
 export const Hinatazaka46_Images_FilePath = path.join(PicturesFolderPath, 'Hinatazaka46_Images');
 export const Sakurazaka46_Images_FilePath = path.join(PicturesFolderPath, 'Sakurazaka46_Images');
 export const Nogizaka46_Images_FilePath = path.join(PicturesFolderPath, 'Nogizaka46_Images');
+export const Keyakizaka46_Images_FilePath = path.join(PicturesFolderPath, 'Keyakizaka46_Images');
 export const Bokuao_Images_FilePath = path.join(PicturesFolderPath, 'Bokuao_Images');
 
 export const Hinatazaka46_BlogStatus_FilePath = path.join(Hinatazaka46_Images_FilePath, BlogStatus_FilePath);
@@ -45,6 +47,7 @@ export const Hinatazaka46_History_FilePath = path.join(Hinatazaka46_Images_FileP
 export const Sakurazaka46_BlogStatus_FilePath = path.join(Sakurazaka46_Images_FilePath, BlogStatus_FilePath);
 export const Sakurazaka46_History_FilePath = path.join(Sakurazaka46_Images_FilePath, History_FilePath);
 export const Nogizaka46_BlogStatus_FilePath = path.join(Nogizaka46_Images_FilePath, BlogStatus_FilePath);
+export const Keyakizaka46_BlogStatus_FilePath = path.join(Keyakizaka46_Images_FilePath, BlogStatus_FilePath);
 export const Bokuao_BlogStatus_FilePath = path.join(Bokuao_Images_FilePath, BlogStatus_FilePath);
 export const Hinatazaka46_StartDay = new Date(2019, 1, 11)
 export const Hinatazaka46_EndDay = new Date(2025, 4, 27)
@@ -63,6 +66,7 @@ export const DateFormats = [
     'yyyy/MM/dd HH:mm:ss',
     'yyyy.MM.dd',
     'yyyy/MM/dd HH:mm',
+    'yyyy.Mdd',
 ];
 
 // An enumeration for idol groups
@@ -70,6 +74,7 @@ export const IdolGroup = Object.freeze({
     Nogizaka46: 'Nogizaka46',
     Sakurazaka46: 'Sakurazaka46',
     Hinatazaka46: 'Hinatazaka46',
+    Keyakizaka46: 'Keyakizaka46',
     Bokuao: 'Bokuao',
 });
 
@@ -393,6 +398,7 @@ function getFolderNameByGroup(group) {
         [IdolGroup.Nogizaka46]: '◢乃木坂46',
         [IdolGroup.Sakurazaka46]: '◢櫻坂46',
         [IdolGroup.Hinatazaka46]: '◢日向坂46',
+        [IdolGroup.Keyakizaka46]: '◢櫸坂46',
         [IdolGroup.Bokuao]: '僕青',
     };
     return map[group] || 'Unknown';
@@ -562,6 +568,8 @@ export async function appendBlogImagesToArchive(member, lastUpdate = null) {
     const homePage = getHomePageByGroup(member.Group);
     const folderName = getFolderNameByGroup(member.Group);
     const imgFolder = path.join(folderName, member.Name);
+
+    const limit = pLimit(threadCount); // Limit to 5 concurrent downloads
     const tzOffsetMs = 8 * 60 * 60 * 1000; // UTC+8
 
     // 3) Process each blog in parallel, but keep per-blog context for logging
@@ -575,14 +583,14 @@ export async function appendBlogImagesToArchive(member, lastUpdate = null) {
             const results = await Promise.all(
                 ImageList
                     .filter(rel => sourceExtensions.includes(path.extname(rel).toLowerCase()))
-                    .map(async rel => {
-                        const url = `${homePage}${rel}`;
+                    .map(rel => limit(async () => {
                         const ext = path.extname(rel).toLowerCase();
                         const base = path.basename(rel, ext);
                         const filename = sanitizeFileName(base, ext, ID);
                         const archivePath = path.join(imgFolder, filename);
-                        const fileDate = new Date(blogDatetime + tzOffsetMs);
 
+                        const fileDate = new Date(blogDatetime + tzOffsetMs);
+                        const url = `${homePage}${rel}`;
                         try {
                             const data = await loadUrlData(url, 3);
                             if (!data) throw new Error('No data');
@@ -592,10 +600,11 @@ export async function appendBlogImagesToArchive(member, lastUpdate = null) {
                             return null;
                         }
                     })
+                    )
             );
 
             // collect successes and log per-blog if all images succeeded
-            const successes = results.filter(r => r !== null);
+            const successes = results.filter(Boolean);
             if (successes.length === ImageList.length) {
                 console.log(
                     `Saved ${Name} blog [${Title}] ${new Date(blogDatetime).toLocaleString("ja-JP", { timeZone: 'Japan' })} ImageCount:${ImageList.length}`
@@ -612,7 +621,7 @@ export async function appendBlogImagesToArchive(member, lastUpdate = null) {
 }
 
 export async function HistoryImagesToArchive(history_photos_col) {
-    const limit = pLimit(threadCount); // Limit to 5 concurrent promises
+    const limit = pLimit(threadCount);
     const archivePromises = [];
 
     for (const col of history_photos_col) {

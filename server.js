@@ -4,6 +4,7 @@ import os from 'os';
 import {
     Hinatazaka46_BlogStatus_FilePath,
     Sakurazaka46_BlogStatus_FilePath,
+    Keyakizaka46_BlogStatus_FilePath,
     Nogizaka46_BlogStatus_FilePath,
     Hinatazaka46_History_FilePath,
     Bokuao_BlogStatus_FilePath,
@@ -23,15 +24,18 @@ import {
 
 // If you keep your "controller" modules in a folder "controller", import them:
 import { Hinatazaka46_Crawler, Hinatazaka46_History_Crawler } from './controller/hinatazaka.js';
+import { Keyakizaka46_Crawler } from './controller/keyakizaka.js';
 import { Sakurazaka46_Crawler, Sakurazaka46_History_Crawler } from './controller/sakurazaka.js';
 import { Nogizaka46_Crawler } from './controller/nogizaka.js';
 import { Bokuao_Crawler } from './controller/bokuao.js';
 
-
 const app = express()
 app.use(express.json());
 const interfaces = os.networkInterfaces();
-const port = 5016
+const port = 22350
+
+let fullMemberList = getFullMemberList();
+let desiredNameList = loadDesiredMemberList();
 
 // Helper to run all crawlers in parallel
 async function crawlAll() {
@@ -41,6 +45,7 @@ async function crawlAll() {
         Nogizaka46_Crawler(),
         Bokuao_Crawler(),
     ]);
+    fullMemberList = getFullMemberList();
 }
 
 // Helper to get every member from every group
@@ -49,6 +54,7 @@ function getFullMemberList() {
         ...getJsonList(Hinatazaka46_BlogStatus_FilePath),
         ...getJsonList(Sakurazaka46_BlogStatus_FilePath),
         ...getJsonList(Nogizaka46_BlogStatus_FilePath),
+        ...getJsonList(Keyakizaka46_BlogStatus_FilePath),
         ...getJsonList(Bokuao_BlogStatus_FilePath),
     ];
 }
@@ -79,12 +85,15 @@ function getWebsite(body) {
         `
 }
 
+app.get('/keyaki', async (_, res) => {
+    await Keyakizaka46_Crawler();
+    res.redirect('/')
+})
+
 app.get('/', (_, res) => {
-    const members = getFullMemberList();
-    const desiredNames = loadDesiredMemberList();
 
     // group by `Group`
-    const grouped = members.reduce((acc, m) => {
+    const grouped = fullMemberList.reduce((acc, m) => {
         const g = m.Group || 'Ungrouped';
         (acc[g] = acc[g] || []).push(m);
         return acc;
@@ -112,17 +121,16 @@ app.get('/', (_, res) => {
             if (!m) return `<td></td>`;
             const blogCount = m.BlogList.length;
             const imageCount = m.BlogList.flatMap(blog => blog.ImageList).length;
-            const isDesired = desiredNames.includes(m.Name);
+            const isDesired = desiredNameList.includes(m.Name);
             const mark = isDesired ? '✔️' : '❌';
-            const qn = encodeURIComponent(m.Name);
+            const params = `member=${m.Name}&group=${m.Group}`
             const action = isDesired ? 'remove' : 'add';
-            const actionLabel = isDesired ? 'Remove' : 'Add';
             const tdContent =
                 `
                                     <td>
-                                    <a href="/members/${action}?member=${qn}">${mark} ${m.Name}</a>
-                                    Blogs:<a href="/members/blogs?member=${m.Name}">${blogCount}</a>
-                                    Images:<a href="/export?member=${qn}"> ${imageCount}</a> 
+                                    <a href="/members/${action}?member=${m.Name}">${mark} ${m.Name}</a>
+                                    Blogs:<a href="/members/blogs?${params}">${blogCount}</a>
+                                    Images:<a href="/export?${params}"> ${imageCount}</a> 
                                     </td>
                                 `;
             return tdContent
@@ -161,7 +169,7 @@ app.get('/refresh', async (_, res) => {
 // Single unified export endpoint
 app.get('/export', async (req, res) => {
     try {
-        const { member, date } = req.query;
+        const { member, date, blogId } = req.query;
         // 1) determine cutoff date
         const defaultDate = new Date(Date.now() - 7 * 24 * 3600 * 1000);
         let lastUpdate = defaultDate;
@@ -176,13 +184,13 @@ app.get('/export', async (req, res) => {
         await crawlAll();
 
         // 3) pick members to export
-        const allMembers = getFullMemberList();
-        const desired = loadDesiredMemberList();
-
         // if ?member=Name, only that one; otherwise all desired
-        const memberToExport = member
-            ? allMembers.filter(m => m.Name === member)
-            : allMembers.filter(m => desired.includes(m.Name));
+        const memberToExport = member ?
+            (
+                blogId ? fullMemberList.filter(m => m.Name === member).map(m => ({ ...m, BlogList: m.BlogList.filter(b => b.ID === blogId) })) :
+                    fullMemberList.filter(m => m.Name === member)
+            )
+            : fullMemberList.filter(m => desiredNameList.includes(m.Name));
 
         if (!memberToExport.length) {
             return res.status(404).json({ error: 'No matching members found' });
@@ -219,33 +227,52 @@ app.get('/export', async (req, res) => {
 
 // Member Blogs List
 app.get('/members/blogs', (req, res) => {
-    const { member } = req.query;
-    const selected = getFullMemberList().find(m => m.Name === member);
+    const { member, group } = req.query;
+    const selected = fullMemberList.find(m => m.Name === member && m.Group === group);
     if (!selected) return res.send(getWebsite('<p>Member not found</p>'));
+
+    const params = `member=${selected.Name}&group=${selected.Group}`
+    const blogCount = selected.BlogList.length;
+    const imageCount = selected.BlogList.flatMap(blog => blog.ImageList).length;
 
     const rows = selected.BlogList
         .sort((a, b) => b.ID - a.ID)
         .map(blog => `
                         <tr>
                             <td colspan="3">
-                                <a href="/members/blog?member=${member}&blogId=${blog.ID}">
+                                <a href="/members/blog?member=${member}&group=${group}&blogId=${blog.ID}">
                                     ${blog.Title || "No title"}
                                 </a>
                             </td>
                             <td>${blog.Name}</td>
                             <td>${new Date(blog.DateTime).toLocaleString("zh-TW", { timeZone: 'ROC' })}</td>
+                            <td>
+                                <a href="/export?member=${member}&group=${group}&blogId=${blog.ID}">
+                                    Download
+                                </a>
+                            </td>
                         </tr>`
         ).join('');
 
     const htmlbody = `
                     <a href="/">← Back</a>
                     <h2>${selected.Name} (${selected.Group})</h2>
+                    <p><strong>    
+                    Blog: ${blogCount} 
+                    </strong>
+                    </p>     
+                    <p><strong>    
+                    Images: ${imageCount} <a href="/export?${params}">Download  </a> 
+                    </strong>
+                    </p>                                 
+                  
                     <table>
                         <thead>
                             <tr>
                                 <th colspan="3">Blog Title</th>
                                 <th>Series</th>
                                 <th>Date & Time</th>
+                                <th>Download</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -259,8 +286,8 @@ app.get('/members/blogs', (req, res) => {
 
 // Single Blog
 app.get('/members/blog', (req, res) => {
-    const { member, blogId } = req.query;
-    const selected = getFullMemberList().find(m => m.Name === member);
+    const { member, blogId, group } = req.query;
+    const selected = fullMemberList.find(m => m.Name === member && m.Group === group);
     const blogIndex = selected?.BlogList.findIndex(b => b.ID == blogId);
     const blog = selected?.BlogList[blogIndex];
 
@@ -275,13 +302,13 @@ app.get('/members/blog', (req, res) => {
 
     const prevnext =
         "<p>" +
-        (previousBlog ? `<strong><a href="/members/blog?member=${member}&blogId=${previousBlog.ID}"><=Previous</a></strong>` : "") +
-        (nextBlog ? `<strong><a href="/members/blog?member=${member}&blogId=${nextBlog.ID}">Next=></a></strong>` : "") +
+        (previousBlog ? `<strong><a href="/members/blog?member=${member}&group=${group}&blogId=${previousBlog.ID}"><=Previous</a></strong>` : "") +
+        (nextBlog ? `<strong><a href="/members/blog?member=${member}&group=${group}&blogId=${nextBlog.ID}">Next=></a></strong>` : "") +
         "</p> "
 
 
     const htmlbody = `
-                    <a href="/members/blogs?member=${member}">← Back</a>
+                    <a href="/members/blogs?member=${member}&group=${group}">← Back</a>
                     ${prevnext}
                     <h1>${blog.Title || "No title"}</h1>
                     <h3>By ${blog.Name} | ${new Date(blog.DateTime).toLocaleString("zh-TW", { timeZone: 'ROC' })}</h3>
@@ -299,6 +326,7 @@ app.get('/members/add', (req, res) => {
     }
     const success = addDesiredMember(member);
     if (success) {
+        desiredNameList = loadDesiredMemberList();
         res.redirect('/');
     } else {
         return res.status(500).json({ error: 'Unable to add member' });
@@ -311,6 +339,7 @@ app.get('/members/remove', (req, res) => {
     if (member) {
         const success = removeDesiredMember(member);
         if (success) {
+            desiredNameList = loadDesiredMemberList();
             res.redirect('/');
         } else {
             return res.status(500).json({ error: 'Unable to remove member' });
@@ -321,7 +350,7 @@ app.get('/members/remove', (req, res) => {
 });
 
 app.get('/history/refresh', async (req, res) => {
-    //await Hinatazaka46_History_Crawler();
+    await Hinatazaka46_History_Crawler();
     await Sakurazaka46_History_Crawler();
     res.redirect('/history/list')
 })
